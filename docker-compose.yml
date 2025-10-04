@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # قاعدة البيانات PostgreSQL
+  db:
+    image: postgres:14-alpine
+    container_name: alawael_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-alawael_daycare}
+      POSTGRES_USER: ${DB_USER:-alawael_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - alawael_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-alawael_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # تطبيق Flask
+  web:
+    build: .
+    container_name: alawael_web
+    restart: always
+    environment:
+      DATABASE_URI: postgresql://${DB_USER:-alawael_user}:${DB_PASSWORD:-changeme}@db:5432/${DB_NAME:-alawael_daycare}
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-jwt-secret-key-change-this}
+      FLASK_ENV: ${FLASK_ENV:-production}
+      DEBUG: ${DEBUG:-False}
+      MAIL_SERVER: ${MAIL_SERVER:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+    volumes:
+      - ./static/uploads:/app/static/uploads
+      - ./logs:/app/logs
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - alawael_network
+
+  # Nginx كخادم ويب عكسي (اختياري)
+  nginx:
+    image: nginx:alpine
+    container_name: alawael_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./static:/app/static:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+    networks:
+      - alawael_network
+
+networks:
+  alawael_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
