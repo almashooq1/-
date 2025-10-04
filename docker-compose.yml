@@ -1,0 +1,172 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: alawael_postgres
+    environment:
+      POSTGRES_DB: alawael_erp
+      POSTGRES_USER: alawael_user
+      POSTGRES_PASSWORD: alawael_pass_2024
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - alawael_network
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:6.0
+    container_name: alawael_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: alawael_admin
+      MONGO_INITDB_ROOT_PASSWORD: alawael_mongo_2024
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - alawael_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: alawael_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - alawael_network
+
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: alawael_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: alawael_user
+      RABBITMQ_DEFAULT_PASS: alawael_rabbit_2024
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - alawael_network
+
+  # Main Flask Application
+  app:
+    build: .
+    container_name: alawael_app
+    command: gunicorn -w 4 -b 0.0.0.0:5000 "ملف موقع الاوائل 2:app"
+    volumes:
+      - .:/app
+      - static_volume:/app/static
+      - media_volume:/app/media
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URI=postgresql://alawael_user:alawael_pass_2024@postgres:5432/alawael_erp
+      - MONGODB_URI=mongodb://alawael_admin:alawael_mongo_2024@mongodb:27017/
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://alawael_user:alawael_rabbit_2024@rabbitmq:5672/
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+      - rabbitmq
+    networks:
+      - alawael_network
+
+  # Celery Worker
+  celery_worker:
+    build: .
+    container_name: alawael_celery_worker
+    command: celery -A celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://redis:6379/3
+    depends_on:
+      - redis
+      - rabbitmq
+      - app
+    networks:
+      - alawael_network
+
+  # Celery Beat (Scheduler)
+  celery_beat:
+    build: .
+    container_name: alawael_celery_beat
+    command: celery -A celery_app beat --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/2
+    depends_on:
+      - redis
+      - celery_worker
+    networks:
+      - alawael_network
+
+  # Nginx Web Server
+  nginx:
+    image: nginx:alpine
+    container_name: alawael_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - static_volume:/app/static
+      - media_volume:/app/media
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+    networks:
+      - alawael_network
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: alawael_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - alawael_network
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: alawael_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=alawael_grafana_2024
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - alawael_network
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  rabbitmq_data:
+  static_volume:
+  media_volume:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  alawael_network:
+    driver: bridge
